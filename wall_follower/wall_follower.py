@@ -152,7 +152,7 @@ class WallFollower(Node):
             # Find where our look ahead intersects the path
 
             if self.SIDE == -1:
-                intersect = self.circle_intersection(slope_lw, shifted_y_intercept, self.LOOK_AHEAD)
+                intersect = self.circle_intersection(slope_rw, shifted_y_intercept, self.LOOK_AHEAD)
             else:
                 intersect = self.circle_intersection(slope_lw, shifted_y_intercept, self.LOOK_AHEAD)
 
