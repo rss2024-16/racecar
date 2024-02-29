@@ -37,7 +37,8 @@ class WallFollower(Node):
 
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
         self.cmd_pub = self.create_publisher(AckermannDriveStamped, '/drive', 10)
-        self.line_pub = self.create_publisher(Marker, '/wall', 10)
+        self.line_pub_left = self.create_publisher(Marker, '/left_wall', 10)
+        self.line_pub_right = self.create_publisher(Marker, '/right_wall', 10)
 
     def polar_to_cartesian(self, radius, theta):
         x = radius * np.cos(theta)
@@ -115,38 +116,51 @@ class WallFollower(Node):
         # Filter scan by angle range and distances
         angles = np.arange(msg.angle_min, msg.angle_max, msg.angle_increment)
         ranges = np.array(msg.ranges)
-        if self.SIDE == -1: # Right wall
-            valid_indices = (angles <= -self.L_CULL_ANGLE) & (angles >= -self.R_CULL_ANGLE) & (ranges <= self.CULL_DISTANCE)
-        else: # Left wall
-            valid_indices = (angles >= self.L_CULL_ANGLE) & (angles <= self.R_CULL_ANGLE) & (ranges <= self.CULL_DISTANCE)  
+        valid_indices_rw = (angles <= -self.L_CULL_ANGLE) & (angles >= -self.R_CULL_ANGLE) & (ranges <= self.CULL_DISTANCE)
+        valid_indices_lw = (angles >= self.L_CULL_ANGLE) & (angles <= self.R_CULL_ANGLE) & (ranges <= self.CULL_DISTANCE)  
         
-        side_angles = angles[valid_indices]
-        side_ranges = ranges[valid_indices]
+        side_angles_rw = angles[valid_indices_rw]
+        side_ranges_rw = ranges[valid_indices_rw]
+
+        side_angles_lw = angles[valid_indices_lw]
+        side_ranges_lw = ranges[valid_indices_lw]
 
         # Convert the polar coordinates to cartesian
-        x_values, y_values = self.polar_to_cartesian(np.array(side_ranges), side_angles)
+        x_values_rw, y_values_rw = self.polar_to_cartesian(np.array(side_ranges_rw), side_angles_rw)
+        x_values_lw,y_values_lw = self.polar_to_cartesian(np.array(side_ranges_lw), side_angles_lw)
 
-        if len(x_values) != 0:
+        x_val_len = len(x_values_rw) if self.SIDE==-1 else len(x_values_lw)
+
+        if x_val_len != 0:
             # Find our wall estimate lines
-            slope, y_intercept = np.polyfit(x_values, y_values, 1)
-            shifted_y_intercept = y_intercept - self.DESIRED_DISTANCE if self.SIDE == 1 else y_intercept + self.DESIRED_DISTANCE
+            slope_rw, y_intercept_rw = np.polyfit(x_values_rw, y_values_rw, 1)
+            slope_lw, y_intercept_lw = np.polyfit(x_values_lw, y_values_lw, 1)
+
+            shifted_y_intercept = y_intercept_lw - self.DESIRED_DISTANCE if self.SIDE == 1 else y_intercept_rw + self.DESIRED_DISTANCE
 
             # Plot the wall
-            y_plot_wall = slope * x_values + y_intercept
-            VisualizationTools.plot_line(x_values, y_plot_wall, self.line_pub, frame="/base_link")
+            y_plot_wall_rw = slope_rw * x_values_rw + y_intercept_rw
+            VisualizationTools.plot_line(x_values_rw, y_plot_wall_rw, self.line_pub_right, frame="/base_link")
+        
+            y_plot_wall_lw = slope_lw * x_values_lw + y_intercept_lw
+            VisualizationTools.plot_line(x_values_lw, y_plot_wall_lw, self.line_pub_left, frame="/base_link")
 
             # Plot the path
             # y_plot_path = slope * x_values + shifted_y_intercept
             # VisualizationTools.plot_line(x_values, y_plot_path, self.line_pub, frame="/base_link")
 
             # Find where our look ahead intersects the path
-            intersect = self.circle_intersection(slope, shifted_y_intercept, self.LOOK_AHEAD)
+
+            if self.SIDE == -1:
+                intersect = self.circle_intersection(slope_lw, shifted_y_intercept, self.LOOK_AHEAD)
+            else:
+                intersect = self.circle_intersection(slope_lw, shifted_y_intercept, self.LOOK_AHEAD)
 
             # Plot the destination point
             angles = np.linspace(0, 2*np.pi, 20)
             x_dest = intersect[0] + 0.1 * np.cos(angles)
             y_dest = intersect[1] + 0.1 * np.sin(angles)
-            VisualizationTools.plot_line(x_dest, y_dest, self.line_pub, frame="/base_link", color=(0., 1., 0.))
+            VisualizationTools.plot_line(x_dest, y_dest, self.line_pub_left, frame="/base_link", color=(0., 1., 0.))
 
             # Calculate our turn angle
             turn_angle = math.atan2(2 * self.BASE_LENGTH * intersect[1], self.LOOK_AHEAD**2)
@@ -162,7 +176,7 @@ class WallFollower(Node):
         drive_cmd = AckermannDriveStamped()
         drive_cmd.drive.speed = speed
         drive_cmd.drive.steering_angle = turn_angle
-        self.cmd_pub.publish(drive_cmd)
+        # self.cmd_pub.publish(drive_cmd)
 
 def main():
     
@@ -174,7 +188,7 @@ def main():
         stop_msg = AckermannDriveStamped()
         stop_msg.drive.speed=0.0
         stop_msg.drive.steering_angle=0.0
-        wall_follower.drive_publisher.publish(stop_msg)
+        wall_follower.cmd_pub.publish(stop_msg)
     wall_follower.destroy_node()
     rclpy.shutdown()
 
