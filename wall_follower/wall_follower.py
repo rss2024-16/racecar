@@ -168,7 +168,13 @@ def main():
     
     rclpy.init()
     wall_follower = WallFollower()
-    rclpy.spin(wall_follower)
+    try:
+        rclpy.spin(wall_follower)
+    except KeyboardInterrupt:
+        stop_msg = AckermannDriveStamped()
+        stop_msg.drive.speed=0.0
+        stop_msg.drive.steering_angle=0.0
+        wall_follower.drive_publisher.publish(stop_msg)
     wall_follower.destroy_node()
     rclpy.shutdown()
 
