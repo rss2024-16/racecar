@@ -31,14 +31,22 @@ class WallFollower(Node):
         # Local constants
         self.L_CULL_ANGLE = math.radians(0)
         self.R_CULL_ANGLE = math.radians(90)
+
+        self.F_CULL_ANGLE = math.radians(20)
+
         self.CULL_DISTANCE = 5
         self.LOOK_AHEAD = 2
         self.BASE_LENGTH = 0.3
+
+        self.SIDE = 1
+
+        self.VELOCITY = 2.0
 
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
         self.cmd_pub = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         self.line_pub_left = self.create_publisher(Marker, '/left_wall', 10)
         self.line_pub_right = self.create_publisher(Marker, '/right_wall', 10)
+        self.line_pub_front = self.create_publisher(Marker,'/front_wall',10)
 
     def polar_to_cartesian(self, radius, theta):
         x = radius * np.cos(theta)
@@ -108,6 +116,16 @@ class WallFollower(Node):
         else:
             return intersection_points[1]
         
+    def lineintersect(self,eq1,eq2):
+        '''
+        eq1/2 - 2d array [m,c] where m is slope and c is intercept
+        '''
+        slope_diff = eq1[0]-eq2[0]
+        y_int_diff = eq2[1]-eq1[1]
+        x_int = y_int_diff/slope_diff
+        y_int = eq1[0]*x_int + eq1[1]
+        return [x_int,y_int]
+        
     def scan_callback(self, msg):
         self.SIDE = self.get_parameter('side').get_parameter_value().integer_value
         self.VELOCITY = self.get_parameter('velocity').get_parameter_value().double_value
@@ -116,18 +134,35 @@ class WallFollower(Node):
         # Filter scan by angle range and distances
         angles = np.arange(msg.angle_min, msg.angle_max, msg.angle_increment)
         ranges = np.array(msg.ranges)
-        valid_indices_rw = (angles <= -self.L_CULL_ANGLE) & (angles >= -self.R_CULL_ANGLE) & (ranges <= self.CULL_DISTANCE)
-        valid_indices_lw = (angles >= self.L_CULL_ANGLE) & (angles <= self.R_CULL_ANGLE) & (ranges <= self.CULL_DISTANCE)  
-        
+
+        distance = self.CULL_DISTANCE
+
+        valid_indices_rw = (angles <= -self.L_CULL_ANGLE) & (angles >= -self.R_CULL_ANGLE) & (ranges <= distance)
+        while not valid_indices_rw.any(): #check if the array will be empty
+            distance += 1
+            valid_indices_rw = (angles <= -self.L_CULL_ANGLE) & (angles >= -self.R_CULL_ANGLE) & (ranges <= distance)
+
+        distance = self.CULL_DISTANCE
+        valid_indices_lw = (angles >= self.L_CULL_ANGLE) & (angles <= self.R_CULL_ANGLE) & (ranges <= distance)  
+        while not valid_indices_lw.any():
+            distance+=1
+            valid_indices_lw = (angles >= self.L_CULL_ANGLE) & (angles <= self.R_CULL_ANGLE) & (ranges <= distance)  
+
+        valid_indices_ft = (angles >= -self.F_CULL_ANGLE) & (angles <= self.F_CULL_ANGLE)
+
         side_angles_rw = angles[valid_indices_rw]
         side_ranges_rw = ranges[valid_indices_rw]
 
         side_angles_lw = angles[valid_indices_lw]
         side_ranges_lw = ranges[valid_indices_lw]
 
+        front_angles = angles[valid_indices_ft]
+        front_ranges = ranges[valid_indices_ft]
+
         # Convert the polar coordinates to cartesian
         x_values_rw, y_values_rw = self.polar_to_cartesian(np.array(side_ranges_rw), side_angles_rw)
         x_values_lw,y_values_lw = self.polar_to_cartesian(np.array(side_ranges_lw), side_angles_lw)
+        x_values_ft,y_values_ft = self.polar_to_cartesian(np.array(front_ranges),front_angles)
 
         x_val_len = len(x_values_rw) if self.SIDE==-1 else len(x_values_lw)
 
@@ -135,6 +170,7 @@ class WallFollower(Node):
             # Find our wall estimate lines
             slope_rw, y_intercept_rw = np.polyfit(x_values_rw, y_values_rw, 1)
             slope_lw, y_intercept_lw = np.polyfit(x_values_lw, y_values_lw, 1)
+            slope_ft,y_intercept_ft = np.polyfit(x_values_ft,y_values_ft,1)
 
             shifted_y_intercept = y_intercept_lw - self.DESIRED_DISTANCE if self.SIDE == 1 else y_intercept_rw + self.DESIRED_DISTANCE
 
@@ -145,6 +181,9 @@ class WallFollower(Node):
             y_plot_wall_lw = slope_lw * x_values_lw + y_intercept_lw
             VisualizationTools.plot_line(x_values_lw, y_plot_wall_lw, self.line_pub_left, frame="/base_link")
 
+            y_plot_ft = slope_ft * x_values_ft + y_intercept_ft
+            VisualizationTools.plot_line(x_values_ft,y_plot_ft,self.line_pub_front,frame='/base_link')
+            
             # Plot the path
             # y_plot_path = slope * x_values + shifted_y_intercept
             # VisualizationTools.plot_line(x_values, y_plot_path, self.line_pub, frame="/base_link")
@@ -156,6 +195,19 @@ class WallFollower(Node):
             else:
                 intersect = self.circle_intersection(slope_lw, shifted_y_intercept, self.LOOK_AHEAD)
 
+
+            max_wall_distance = 3.0
+            if max(front_ranges) < max_wall_distance:
+                #check if side is right and we are approaching a right corner
+                if max(abs(side_ranges_lw)) > max(abs(side_ranges_rw)): #right wall
+                    intersect = self.lineintersect([slope_ft,y_intercept_ft],[slope_rw,y_intercept_rw])
+                    intersect[1] = -intersect[1] + self.DESIRED_DISTANCE
+                    intersect[0] = self.SIDE*self.DESIRED_DISTANCE
+                elif max(abs(side_ranges_rw)) > max(abs(side_ranges_lw)): #left wall
+                    intersect = self.lineintersect([slope_ft,y_intercept_ft],[slope_lw,y_intercept_lw])
+                    intersect[1] = self.SIDE*self.DESIRED_DISTANCE
+                    intersect[0] = -intersect[0] + self.DESIRED_DISTANCE
+                
             # Plot the destination point
             angles = np.linspace(0, 2*np.pi, 20)
             x_dest = intersect[0] + 0.1 * np.cos(angles)
@@ -176,7 +228,7 @@ class WallFollower(Node):
         drive_cmd = AckermannDriveStamped()
         drive_cmd.drive.speed = speed
         drive_cmd.drive.steering_angle = turn_angle
-        # self.cmd_pub.publish(drive_cmd)
+        self.cmd_pub.publish(drive_cmd)
 
 def main():
     
