@@ -6,7 +6,7 @@ from sensor_msgs.msg import LaserScan
 from ackermann_msgs.msg import AckermannDriveStamped
 from visualization_msgs.msg import Marker
 
-from wall_follower.visualization_tools import VisualizationTools
+from max_wall_follower.visualization_tools import VisualizationTools
 
 
 class WallFollower(Node):
@@ -26,14 +26,14 @@ class WallFollower(Node):
         self.SIDE = self.get_parameter('side').get_parameter_value().integer_value
         self.VELOCITY = self.get_parameter('velocity').get_parameter_value().double_value
         self.DESIRED_DISTANCE = self.get_parameter('desired_distance').get_parameter_value().double_value
-		
+
 	# TODO: Initialize your publishers and subscribers here
 
-    # TODO: Write your callback functions here    
+    # TODO: Write your callback functions here
     # comment
 
 def main():
-    
+
     rclpy.init()
     wall_follower = WallFollower()
     rclpy.spin(wall_follower)
@@ -43,4 +43,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-    

@@ -5,11 +5,11 @@ import numpy as np
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from visualization_msgs.msg import Marker
-from wall_follower.visualization_tools import VisualizationTools  # Assuming VisualizationTools is a class in visualization_tools module
+from max_wall_follower.visualization_tools import VisualizationTools  # Assuming VisualizationTools is a class in visualization_tools module
 
 class LinePublisher(Node):
 
-        
+
         # the topics to publish and subscribe to
     WALL_TOPIC = "/wall"
 
