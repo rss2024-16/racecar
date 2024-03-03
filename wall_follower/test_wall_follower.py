@@ -19,7 +19,7 @@ from tf2_ros.transform_listener import TransformListener
 
 class WallTest(Node):
 
-    
+
     def __init__(self):
         super().__init__("test_wall_follower")
         # Declare parameters to make them available for use
@@ -54,7 +54,7 @@ class WallTest(Node):
         self.END_y = self.get_parameter('end_y').get_parameter_value().double_value
         self.NAME = self.get_parameter('name').get_parameter_value().string_value
 
-        self.get_logger().info('Test Name %s' % (self.TEST_NAME))       
+        self.get_logger().info('Test Name %s' % (self.TEST_NAME))
 
 
         self.max_time_per_test = 120
@@ -82,7 +82,7 @@ class WallTest(Node):
 
         self.moved = False
         self.buffer_count = 0
-    
+
     def place_car(self, pose):
         p = Pose()
 
@@ -100,7 +100,7 @@ class WallTest(Node):
         self.get_logger().info('Placed Car: %f' % (p.position.y))
 
 
-    def laser_callback(self, laser_scan):        
+    def laser_callback(self, laser_scan):
 
         if self.buffer_count < 30:
             self.place_car(self.START_POSE)
@@ -119,8 +119,8 @@ class WallTest(Node):
             self.get_logger().info(
                 f'Could not transform {to_frame_rel} to {from_frame_rel}: {ex}')
             return
-        
-        if not self.moved: 
+
+        if not self.moved:
             diff = np.linalg.norm(np.array([self.START_x, self.START_y]) - np.array([t.transform.translation.x, t.transform.translation.y]))
             if 0.3 < (diff):
                 self.place_car(self.START_POSE)
@@ -131,7 +131,7 @@ class WallTest(Node):
                 self.moved = True
                 self.get_logger().info('Moved: %s' % (self.moved))
                 self.start_time = self.get_clock().now()
-        
+
 
         ranges = np.array(laser_scan.ranges, dtype='float32')
 
@@ -161,9 +161,9 @@ class WallTest(Node):
         dist = np.sum(dists)/dists.shape[0]
         self.get_logger().info('Avg dist: %f' % (dist))
 
-        
+
         pos = [t.transform.translation.x, t.transform.translation.y]
-        
+
         time = self.get_clock().now() - self.start_time
         time_d = time.nanoseconds * 1e-9
         self.positions.append([time_d] + pos + [dist])
@@ -171,8 +171,8 @@ class WallTest(Node):
         # self.get_logger().info(
         #             f'Time: {time_d}, Max time: {self.max_time_per_test}')
 
-        
-        
+
+
         if time_d > self.max_time_per_test:
             self.get_logger().info("Test timed out!")
             # Send a message of zero
@@ -193,11 +193,11 @@ class WallTest(Node):
             np.savez_compressed(self.TEST_NAME+"_log", **self.saves)
             raise SystemExit
 
-    
+
 
 
 def main():
-    
+
     rclpy.init()
     wall_follower_test = WallTest()
     try:
@@ -210,4 +210,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-    
