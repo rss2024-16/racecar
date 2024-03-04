@@ -32,15 +32,12 @@ class WallFollower(Node):
         self.L_CULL_ANGLE = math.radians(0)
         self.R_CULL_ANGLE = math.radians(90)
 
-        self.F_CULL_ANGLE = math.radians(20)
+        self.F_CULL_ANGLE = math.radians(20) #front hemisphere
 
         self.CULL_DISTANCE = 5
-        self.LOOK_AHEAD = 2
+        self.LOOK_AHEAD = 1 #should probs be a function of speed
         self.BASE_LENGTH = 0.3
-
-        self.SIDE = 1
-
-        self.VELOCITY = 2.0
+        
 
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
         self.cmd_pub = self.create_publisher(AckermannDriveStamped, '/drive', 10)
@@ -119,6 +116,8 @@ class WallFollower(Node):
     def lineintersect(self,eq1,eq2):
         '''
         eq1/2 - 2d array [m,c] where m is slope and c is intercept
+
+        returns [x,y] where x and y are intercept location relative to robot
         '''
         slope_diff = eq1[0]-eq2[0]
         y_int_diff = eq2[1]-eq1[1]
@@ -164,65 +163,56 @@ class WallFollower(Node):
         x_values_lw,y_values_lw = self.polar_to_cartesian(np.array(side_ranges_lw), side_angles_lw)
         x_values_ft,y_values_ft = self.polar_to_cartesian(np.array(front_ranges),front_angles)
 
-        x_val_len = len(x_values_rw) if self.SIDE==-1 else len(x_values_lw)
+        # Find our wall estimate lines
+        slope_rw, y_intercept_rw = np.polyfit(x_values_rw, y_values_rw, 1)
+        slope_lw, y_intercept_lw = np.polyfit(x_values_lw, y_values_lw, 1)
+        slope_ft,y_intercept_ft = np.polyfit(x_values_ft,y_values_ft,1)
 
-        if x_val_len != 0:
-            # Find our wall estimate lines
-            slope_rw, y_intercept_rw = np.polyfit(x_values_rw, y_values_rw, 1)
-            slope_lw, y_intercept_lw = np.polyfit(x_values_lw, y_values_lw, 1)
-            slope_ft,y_intercept_ft = np.polyfit(x_values_ft,y_values_ft,1)
+        shifted_y_intercept = y_intercept_lw - self.DESIRED_DISTANCE if self.SIDE == 1 else y_intercept_rw + self.DESIRED_DISTANCE
 
-            shifted_y_intercept = y_intercept_lw - self.DESIRED_DISTANCE if self.SIDE == 1 else y_intercept_rw + self.DESIRED_DISTANCE
+        # Plot the wall
+        y_plot_wall_rw = slope_rw * x_values_rw + y_intercept_rw
+        VisualizationTools.plot_line(x_values_rw, y_plot_wall_rw, self.line_pub_right, frame="/base_link")
+    
+        y_plot_wall_lw = slope_lw * x_values_lw + y_intercept_lw
+        VisualizationTools.plot_line(x_values_lw, y_plot_wall_lw, self.line_pub_left, frame="/base_link")
 
-            # Plot the wall
-            y_plot_wall_rw = slope_rw * x_values_rw + y_intercept_rw
-            VisualizationTools.plot_line(x_values_rw, y_plot_wall_rw, self.line_pub_right, frame="/base_link")
+        y_plot_ft = slope_ft * x_values_ft + y_intercept_ft
+        VisualizationTools.plot_line(x_values_ft,y_plot_ft,self.line_pub_front,frame='/base_link')
         
-            y_plot_wall_lw = slope_lw * x_values_lw + y_intercept_lw
-            VisualizationTools.plot_line(x_values_lw, y_plot_wall_lw, self.line_pub_left, frame="/base_link")
+        # Plot the path
+        # y_plot_path = slope * x_values + shifted_y_intercept
+        # VisualizationTools.plot_line(x_values, y_plot_path, self.line_pub, frame="/base_link")
 
-            y_plot_ft = slope_ft * x_values_ft + y_intercept_ft
-            VisualizationTools.plot_line(x_values_ft,y_plot_ft,self.line_pub_front,frame='/base_link')
-            
-            # Plot the path
-            # y_plot_path = slope * x_values + shifted_y_intercept
-            # VisualizationTools.plot_line(x_values, y_plot_path, self.line_pub, frame="/base_link")
+        # Find where our look ahead intersects the path
 
-            # Find where our look ahead intersects the path
-
-            if self.SIDE == -1:
-                intersect = self.circle_intersection(slope_rw, shifted_y_intercept, self.LOOK_AHEAD)
-            else:
-                intersect = self.circle_intersection(slope_lw, shifted_y_intercept, self.LOOK_AHEAD)
-
-
-            max_wall_distance = 3.0
-            if max(front_ranges) < max_wall_distance:
-                #check if side is right and we are approaching a right corner
-                if max(abs(side_ranges_lw)) > max(abs(side_ranges_rw)): #right wall
-                    intersect = self.lineintersect([slope_ft,y_intercept_ft],[slope_rw,y_intercept_rw])
-                    intersect[1] = -intersect[1] + self.DESIRED_DISTANCE
-                    intersect[0] = self.SIDE*self.DESIRED_DISTANCE
-                elif max(abs(side_ranges_rw)) > max(abs(side_ranges_lw)): #left wall
-                    intersect = self.lineintersect([slope_ft,y_intercept_ft],[slope_lw,y_intercept_lw])
-                    intersect[1] = self.SIDE*self.DESIRED_DISTANCE
-                    intersect[0] = -intersect[0] + self.DESIRED_DISTANCE
-                
-            # Plot the destination point
-            angles = np.linspace(0, 2*np.pi, 20)
-            x_dest = intersect[0] + 0.1 * np.cos(angles)
-            y_dest = intersect[1] + 0.1 * np.sin(angles)
-            VisualizationTools.plot_line(x_dest, y_dest, self.line_pub_left, frame="/base_link", color=(0., 1., 0.))
-
-            # Calculate our turn angle
-            turn_angle = math.atan2(2 * self.BASE_LENGTH * intersect[1], self.LOOK_AHEAD**2)
-            speed = self.VELOCITY
+        if self.SIDE == -1:
+            intersect = self.circle_intersection(slope_rw, shifted_y_intercept, self.LOOK_AHEAD)
         else:
-            # This is bad, debug
-            speed = 0.0
-            turn_angle = 0.0
-            side = "Left Wall" if self.SIDE == 1 else "Right Wall"
-            self.get_logger().info(side)
+            intersect = self.circle_intersection(slope_lw, shifted_y_intercept, self.LOOK_AHEAD)
+
+
+        max_wall_distance = 3.0
+            
+        if max(front_ranges) < max_wall_distance:
+            #if there is a corner, find which side is open and drive toward it
+            if max(abs(side_ranges_lw)) > 2*max(abs(side_ranges_rw)): #right wall, y positive after reflection
+                intersect = self.lineintersect([slope_ft,y_intercept_ft],[slope_rw,y_intercept_rw])
+                intersect[1] = -intersect[1] + self.DESIRED_DISTANCE
+
+            elif max(abs(side_ranges_rw)) > 2*max(abs(side_ranges_lw)): #left , y negative
+                intersect = self.lineintersect([slope_ft,y_intercept_ft],[slope_lw,y_intercept_lw])
+                intersect[1] = -intersect[1] - self.DESIRED_DISTANCE
+            
+        # Plot the destination point
+        angles = np.linspace(0, 2*np.pi, 20)
+        x_dest = intersect[0] + 0.1 * np.cos(angles)
+        y_dest = intersect[1] + 0.1 * np.sin(angles)
+        VisualizationTools.plot_line(x_dest, y_dest, self.line_pub_left, frame="/base_link", color=(0., 1., 0.))
+
+        # Calculate our turn angle
+        turn_angle = math.atan2(2 * self.BASE_LENGTH * intersect[1], self.LOOK_AHEAD**2)
+        speed = self.VELOCITY
 
         # Publish our drive command
         drive_cmd = AckermannDriveStamped()
