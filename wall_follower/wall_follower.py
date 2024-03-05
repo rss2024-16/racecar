@@ -50,7 +50,7 @@ class WallFollower(Node):
         y = radius * np.sin(theta)
         return x, y
 
-    def weighted_linear_fit(self, x, y, weights):
+    def fit_line_weighted(self, x, y, weights):
         w_sum = np.sum(weights)
         w_mean_x = np.sum(weights * x) / w_sum
         w_mean_y = np.sum(weights * y) / w_sum
@@ -63,7 +63,9 @@ class WallFollower(Node):
 
         return slope, intercept
     
-    def fit_line_ransac(self, points, num_iterations=100, threshold=0.1):
+    def fit_line_ransac(self, x, y, num_iterations=100, threshold=0.1):
+        points = np.column_stack((x, y))
+
         best_line = None
         best_inliers = []
 
@@ -113,7 +115,7 @@ class WallFollower(Node):
         else:
             return intersection_points[1]
         
-    def lineintersect(self,eq1,eq2):
+    def line_intersection(self, eq1, eq2):
         '''
         eq1/2 - 2d array [m,c] where m is slope and c is intercept
 
@@ -166,7 +168,7 @@ class WallFollower(Node):
         # Find our wall estimate lines
         slope_rw, y_intercept_rw = np.polyfit(x_values_rw, y_values_rw, 1)
         slope_lw, y_intercept_lw = np.polyfit(x_values_lw, y_values_lw, 1)
-        slope_ft,y_intercept_ft = np.polyfit(x_values_ft,y_values_ft,1)
+        slope_ft,y_intercept_ft = self.fit_line_ransac(x_values_ft,y_values_ft)
 
         shifted_y_intercept = y_intercept_lw - self.DESIRED_DISTANCE if self.SIDE == 1 else y_intercept_rw + self.DESIRED_DISTANCE
 
@@ -186,32 +188,42 @@ class WallFollower(Node):
 
         # Find where our look ahead intersects the path
 
-        if self.SIDE == -1:
-            intersect = self.circle_intersection(slope_rw, shifted_y_intercept, self.LOOK_AHEAD)
-        else:
-            intersect = self.circle_intersection(slope_lw, shifted_y_intercept, self.LOOK_AHEAD)
-
-
         max_wall_distance = 3.0
+        intersect_threshold = 1.0
             
+        # If close to a front wall and front wall is unique
         if max(front_ranges) < max_wall_distance:
-            #if there is a corner, find which side is open and drive toward it
-            if max(abs(side_ranges_lw)) > 2*max(abs(side_ranges_rw)): #right wall, y positive after reflection
-                intersect = self.lineintersect([slope_ft,y_intercept_ft],[slope_rw,y_intercept_rw])
-                intersect[1] = -intersect[1] + self.DESIRED_DISTANCE
+            intersect = self.line_intersection([slope_ft,y_intercept_ft], [slope_rw,y_intercept_rw])
 
-            elif max(abs(side_ranges_rw)) > 2*max(abs(side_ranges_lw)): #left , y negative
-                intersect = self.lineintersect([slope_ft,y_intercept_ft],[slope_lw,y_intercept_lw])
+            # If there is a corner, find which side is open and drive toward it
+            if abs(min(y_values_rw)) > abs(intersect[1]) + intersect_threshold or abs(min(y_values_ft)) > abs(intersect[1]) + intersect_threshold: # Right open
+                intersect = self.line_intersection([slope_ft,y_intercept_ft], [slope_lw,y_intercept_lw])
                 intersect[1] = -intersect[1] - self.DESIRED_DISTANCE
-            
+                intersect[0] -= self.DESIRED_DISTANCE
+
+            else: # Left open
+                intersect[1] = -intersect[1] + self.DESIRED_DISTANCE
+                intersect[0] -= self.DESIRED_DISTANCE
+
+            # Calculate our turn angle
+            turn_angle = math.atan2(2 * self.BASE_LENGTH * math.sin(math.atan2(intersect[1], intersect[0])), math.sqrt(intersect[0]**2 + intersect[1]**2))
+
+        # Else not close
+        else:        
+            if self.SIDE == -1:
+                intersect = self.circle_intersection(slope_rw, shifted_y_intercept, self.LOOK_AHEAD)
+            else:
+                intersect = self.circle_intersection(slope_lw, shifted_y_intercept, self.LOOK_AHEAD)
+
+            # Calculate our turn angle
+            turn_angle = math.atan2(2 * self.BASE_LENGTH * intersect[1], self.LOOK_AHEAD**2)
+
         # Plot the destination point
         angles = np.linspace(0, 2*np.pi, 20)
         x_dest = intersect[0] + 0.1 * np.cos(angles)
         y_dest = intersect[1] + 0.1 * np.sin(angles)
         VisualizationTools.plot_line(x_dest, y_dest, self.line_pub_left, frame="/base_link", color=(0., 1., 0.))
 
-        # Calculate our turn angle
-        turn_angle = math.atan2(2 * self.BASE_LENGTH * intersect[1], self.LOOK_AHEAD**2)
         speed = self.VELOCITY
 
         # Publish our drive command
@@ -238,3 +250,5 @@ def main():
 if __name__ == '__main__':
     main()
     
+
+
