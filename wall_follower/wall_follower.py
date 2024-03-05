@@ -123,7 +123,15 @@ class WallFollower(Node):
         y_int_diff = eq2[1]-eq1[1]
         x_int = y_int_diff/slope_diff
         y_int = eq1[0]*x_int + eq1[1]
-        return [x_int,y_int]
+
+        xy1 = [x_int-1, eq1[0]*(x_int-1)+eq1[1]]
+        xy2 = [x_int+1,eq2[0]*(x_int+1)+eq2[1]]
+
+        a=( (xy1[0]-x_int)**2 + (xy1[1]-y_int)**2 )**(1/2)
+        b=( (xy2[0]-x_int)**2 + (xy2[1]-y_int)**2 )**(1/2)
+        c=( (xy1[0]-xy2[0])**2 + (xy1[1]-xy2[1])**2 )**(1/2)
+        angle = np.arccos( (c**2-a**2-b**2) / (-2*a*b) )
+        return angle
         
     def scan_callback(self, msg):
         self.SIDE = self.get_parameter('side').get_parameter_value().integer_value
@@ -197,12 +205,12 @@ class WallFollower(Node):
         if max(front_ranges) < max_wall_distance:
             #if there is a corner, find which side is open and drive toward it
             if max(abs(side_ranges_lw)) > 2*max(abs(side_ranges_rw)): #right wall, y positive after reflection
-                intersect = self.lineintersect([slope_ft,y_intercept_ft],[slope_rw,y_intercept_rw])
-                intersect[1] = -intersect[1] + self.DESIRED_DISTANCE
+                angle = self.lineintersect([slope_ft,y_intercept_ft],[slope_rw,y_intercept_rw])
+                intersect = [0,2*self.LOOK_AHEAD*np.sin(angle)]
 
             elif max(abs(side_ranges_rw)) > 2*max(abs(side_ranges_lw)): #left , y negative
-                intersect = self.lineintersect([slope_ft,y_intercept_ft],[slope_lw,y_intercept_lw])
-                intersect[1] = -intersect[1] - self.DESIRED_DISTANCE
+                angle = self.lineintersect([slope_ft,y_intercept_ft],[slope_lw,y_intercept_lw])
+                intersect = [0,-2*self.LOOK_AHEAD*np.sin(angle)]
             
         # Plot the destination point
         angles = np.linspace(0, 2*np.pi, 20)
