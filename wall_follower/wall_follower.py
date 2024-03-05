@@ -198,17 +198,25 @@ class WallFollower(Node):
 
         max_wall_distance = 3.0
         intersect_threshold = 1.0
+        if self.SIDE == -1:
+            intersect = self.circle_intersection(slope_rw, shifted_y_intercept, self.LOOK_AHEAD)
+        else:
+            intersect = self.circle_intersection(slope_lw, shifted_y_intercept, self.LOOK_AHEAD)
+        
+        turn_angle = math.atan2(2 * self.BASE_LENGTH * intersect[1], self.LOOK_AHEAD**2)
             
         # If close to a front wall and front wall is unique
         if max(front_ranges) < max_wall_distance:
             #if there is a corner, find which side is open and drive toward it
             if max(abs(side_ranges_lw)) > 2*max(abs(side_ranges_rw)): #right wall, y positive after reflection
-                angle = self.lineintersect([slope_ft,y_intercept_ft],[slope_rw,y_intercept_rw])
-                intersect = [0,2*self.LOOK_AHEAD*np.sin(angle)]
+                angle = self.line_intersection([slope_ft,y_intercept_ft],[slope_rw,y_intercept_rw])
+                intersect = self.LOOK_AHEAD*np.array([np.cos(angle),np.sin(angle)])
+                turn_angle = math.atan2(2 * self.BASE_LENGTH * math.sin(math.atan2(intersect[1], intersect[0])), math.sqrt(intersect[0]**2 + intersect[1]**2))
 
             elif max(abs(side_ranges_rw)) > 2*max(abs(side_ranges_lw)): #left , y negative
-                angle = self.lineintersect([slope_ft,y_intercept_ft],[slope_lw,y_intercept_lw])
-                intersect = [0,-2*self.LOOK_AHEAD*np.sin(angle)]
+                angle = self.line_intersection([slope_ft,y_intercept_ft],[slope_lw,y_intercept_lw])
+                intersect = -self.LOOK_AHEAD*np.array([np.cos(angle),np.sin(angle)])
+                turn_angle = math.atan2(2 * self.BASE_LENGTH * math.sin(math.atan2(intersect[1], intersect[0])), math.sqrt(intersect[0]**2 + intersect[1]**2))
             
         # Plot the destination point
         angles = np.linspace(0, 2*np.pi, 20)
