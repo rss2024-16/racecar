@@ -30,17 +30,19 @@ class WallFollower(Node):
 
         # Local constants
         self.L_CULL_ANGLE = math.radians(0)
-        self.R_CULL_ANGLE = math.radians(90)
+        self.R_CULL_ANGLE = math.radians(45)
 
         self.F_CULL_ANGLE = math.radians(20) #front hemisphere
 
         self.CULL_DISTANCE = 5
         self.LOOK_AHEAD = 1 #should probs be a function of speed
         self.BASE_LENGTH = 0.3
+
+        self.get_logger().info(str(self.VELOCITY))
         
 
-        self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
-        self.cmd_pub = self.create_publisher(AckermannDriveStamped, '/drive', 10)
+        self.scan_sub = self.create_subscription(LaserScan, self.SCAN_TOPIC, self.scan_callback, 10)
+        self.cmd_pub = self.create_publisher(AckermannDriveStamped, self.DRIVE_TOPIC, 10)
         self.line_pub_left = self.create_publisher(Marker, '/left_wall', 10)
         self.line_pub_right = self.create_publisher(Marker, '/right_wall', 10)
         self.line_pub_front = self.create_publisher(Marker,'/front_wall',10)
@@ -136,6 +138,7 @@ class WallFollower(Node):
         return angle
         
     def scan_callback(self, msg):
+        self.get_logger().info(str(len(msg.ranges)))
         self.SIDE = self.get_parameter('side').get_parameter_value().integer_value
         self.VELOCITY = self.get_parameter('velocity').get_parameter_value().double_value
         self.DESIRED_DISTANCE = self.get_parameter('desired_distance').get_parameter_value().double_value
@@ -179,16 +182,16 @@ class WallFollower(Node):
         slope_ft,y_intercept_ft = self.fit_line_ransac(x_values_ft,y_values_ft)
 
         shifted_y_intercept = y_intercept_lw - self.DESIRED_DISTANCE if self.SIDE == 1 else y_intercept_rw + self.DESIRED_DISTANCE
-
+        frame_plot = '/laser'
         # Plot the wall
         y_plot_wall_rw = slope_rw * x_values_rw + y_intercept_rw
-        VisualizationTools.plot_line(x_values_rw, y_plot_wall_rw, self.line_pub_right, frame="/base_link")
+        VisualizationTools.plot_line(x_values_rw, y_plot_wall_rw, self.line_pub_right, frame=frame_plot)
     
         y_plot_wall_lw = slope_lw * x_values_lw + y_intercept_lw
-        VisualizationTools.plot_line(x_values_lw, y_plot_wall_lw, self.line_pub_left, frame="/base_link")
+        VisualizationTools.plot_line(x_values_lw, y_plot_wall_lw, self.line_pub_left, frame=frame_plot)
 
         y_plot_ft = slope_ft * x_values_ft + y_intercept_ft
-        VisualizationTools.plot_line(x_values_ft,y_plot_ft,self.line_pub_front,frame='/base_link')
+        VisualizationTools.plot_line(x_values_ft,y_plot_ft,self.line_pub_front,frame=frame_plot)
         
         # Plot the path
         # y_plot_path = slope * x_values + shifted_y_intercept
@@ -222,7 +225,7 @@ class WallFollower(Node):
         angles = np.linspace(0, 2*np.pi, 20)
         x_dest = intersect[0] + 0.1 * np.cos(angles)
         y_dest = intersect[1] + 0.1 * np.sin(angles)
-        VisualizationTools.plot_line(x_dest, y_dest, self.line_pub_left, frame="/base_link", color=(0., 1., 0.))
+        VisualizationTools.plot_line(x_dest, y_dest, self.line_pub_left, frame=frame_plot, color=(0., 1., 0.))
 
         speed = self.VELOCITY
 
@@ -230,6 +233,7 @@ class WallFollower(Node):
         drive_cmd = AckermannDriveStamped()
         drive_cmd.drive.speed = speed
         drive_cmd.drive.steering_angle = turn_angle
+        self.get_logger().info("publishing drive cmd %s" % str(drive_cmd))
         self.cmd_pub.publish(drive_cmd)
 
 def main():
