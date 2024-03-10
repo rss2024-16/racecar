@@ -4,6 +4,7 @@ import math
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
+from std_msgs.msg import String
 from ackermann_msgs.msg import AckermannDriveStamped
 from visualization_msgs.msg import Marker
 
@@ -16,14 +17,16 @@ class WallFollower(Node):
         super().__init__("wall_follower")
         # Declare parameters to make them available for use
         self.declare_parameter("scan_topic", "default")
-        self.declare_parameter("drive_topic", "default")
+        self.declare_parameter("drive_topic", "/drive")
         self.declare_parameter("side", "default")
         self.declare_parameter("velocity", "default")
         self.declare_parameter("desired_distance", "default")
+        self.declare_parameter("plot_frame", "/base_link")
 
         # Fetch constants from the ROS parameter server
         self.SCAN_TOPIC = self.get_parameter('scan_topic').get_parameter_value().string_value
         self.DRIVE_TOPIC = self.get_parameter('drive_topic').get_parameter_value().string_value
+        self.PLOT_FRAME = self.get_parameter('plot_frame').get_parameter_value().string_value
         self.SIDE = self.get_parameter('side').get_parameter_value().integer_value # 1 is left wall, -1 is right wall
         self.VELOCITY = self.get_parameter('velocity').get_parameter_value().double_value
         self.DESIRED_DISTANCE = self.get_parameter('desired_distance').get_parameter_value().double_value
@@ -32,20 +35,24 @@ class WallFollower(Node):
         self.L_CULL_ANGLE = math.radians(0)
         self.R_CULL_ANGLE = math.radians(45)
 
-        self.F_CULL_ANGLE = math.radians(20) #front hemisphere
+        self.F_CULL_ANGLE = math.radians(20)
 
         self.CULL_DISTANCE = 5
-        self.LOOK_AHEAD = 1 #should probs be a function of speed
+        self.LOOK_AHEAD = 1 # Should prob be a function of speed
         self.BASE_LENGTH = 0.3
 
         self.get_logger().info(str(self.VELOCITY))
         
-
+        # Subscribers
         self.scan_sub = self.create_subscription(LaserScan, self.SCAN_TOPIC, self.scan_callback, 10)
+
+        # Publishers
         self.cmd_pub = self.create_publisher(AckermannDriveStamped, self.DRIVE_TOPIC, 10)
         self.line_pub_left = self.create_publisher(Marker, '/left_wall', 10)
         self.line_pub_right = self.create_publisher(Marker, '/right_wall', 10)
-        self.line_pub_front = self.create_publisher(Marker,'/front_wall',10)
+        self.line_pub_front = self.create_publisher(Marker, '/front_wall', 10)
+        self.path_pub = self.create_publisher(Marker, '/path', 10)
+        self.metric_pub = self.create_publisher(String, '/wall_follower_metrics', 10)
 
     def polar_to_cartesian(self, radius, theta):
         x = radius * np.cos(theta)
@@ -138,7 +145,6 @@ class WallFollower(Node):
         return angle
         
     def scan_callback(self, msg):
-        self.get_logger().info(str(len(msg.ranges)))
         self.SIDE = self.get_parameter('side').get_parameter_value().integer_value
         self.VELOCITY = self.get_parameter('velocity').get_parameter_value().double_value
         self.DESIRED_DISTANCE = self.get_parameter('desired_distance').get_parameter_value().double_value
@@ -149,58 +155,55 @@ class WallFollower(Node):
 
         distance = self.CULL_DISTANCE
 
+        # Get our data slices for left, front, and right walls
         valid_indices_rw = (angles <= -self.L_CULL_ANGLE) & (angles >= -self.R_CULL_ANGLE) & (ranges <= distance)
-        while not valid_indices_rw.any(): #check if the array will be empty
+        while not valid_indices_rw.any(): # Increase cull distance until we get data
             distance += 1
             valid_indices_rw = (angles <= -self.L_CULL_ANGLE) & (angles >= -self.R_CULL_ANGLE) & (ranges <= distance)
-
-        distance = self.CULL_DISTANCE
-        valid_indices_lw = (angles >= self.L_CULL_ANGLE) & (angles <= self.R_CULL_ANGLE) & (ranges <= distance)  
-        while not valid_indices_lw.any():
-            distance+=1
-            valid_indices_lw = (angles >= self.L_CULL_ANGLE) & (angles <= self.R_CULL_ANGLE) & (ranges <= distance)  
-
-        valid_indices_ft = (angles >= -self.F_CULL_ANGLE) & (angles <= self.F_CULL_ANGLE)
-
         side_angles_rw = angles[valid_indices_rw]
         side_ranges_rw = ranges[valid_indices_rw]
 
+        distance = self.CULL_DISTANCE
+        valid_indices_lw = (angles >= self.L_CULL_ANGLE) & (angles <= self.R_CULL_ANGLE) & (ranges <= distance)  
+        while not valid_indices_lw.any(): # Increase cull distance until we get data
+            distance+=1
+            valid_indices_lw = (angles >= self.L_CULL_ANGLE) & (angles <= self.R_CULL_ANGLE) & (ranges <= distance)  
         side_angles_lw = angles[valid_indices_lw]
         side_ranges_lw = ranges[valid_indices_lw]
 
-        front_angles = angles[valid_indices_ft]
-        front_ranges = ranges[valid_indices_ft]
+        valid_indices_fw = (angles >= -self.F_CULL_ANGLE) & (angles <= self.F_CULL_ANGLE)
+        front_angles = angles[valid_indices_fw]
+        front_ranges = ranges[valid_indices_fw]
 
         # Convert the polar coordinates to cartesian
         x_values_rw, y_values_rw = self.polar_to_cartesian(np.array(side_ranges_rw), side_angles_rw)
-        x_values_lw,y_values_lw = self.polar_to_cartesian(np.array(side_ranges_lw), side_angles_lw)
-        x_values_ft,y_values_ft = self.polar_to_cartesian(np.array(front_ranges),front_angles)
+        x_values_lw, y_values_lw = self.polar_to_cartesian(np.array(side_ranges_lw), side_angles_lw)
+        x_values_fw, y_values_fw = self.polar_to_cartesian(np.array(front_ranges), front_angles)
 
         # Find our wall estimate lines
         slope_rw, y_intercept_rw = np.polyfit(x_values_rw, y_values_rw, 1)
         slope_lw, y_intercept_lw = np.polyfit(x_values_lw, y_values_lw, 1)
-        slope_ft,y_intercept_ft = self.fit_line_ransac(x_values_ft,y_values_ft)
-
-        shifted_y_intercept = y_intercept_lw - self.DESIRED_DISTANCE if self.SIDE == 1 else y_intercept_rw + self.DESIRED_DISTANCE
-        frame_plot = '/laser'
-        # Plot the wall
+        slope_fw,y_intercept_fw = self.fit_line_ransac(x_values_fw, y_values_fw)
+        
+        # Plot the walls
         y_plot_wall_rw = slope_rw * x_values_rw + y_intercept_rw
-        VisualizationTools.plot_line(x_values_rw, y_plot_wall_rw, self.line_pub_right, frame=frame_plot)
+        VisualizationTools.plot_line(x_values_rw, y_plot_wall_rw, self.line_pub_right, frame=self.PLOT_FRAME)
     
         y_plot_wall_lw = slope_lw * x_values_lw + y_intercept_lw
-        VisualizationTools.plot_line(x_values_lw, y_plot_wall_lw, self.line_pub_left, frame=frame_plot)
+        VisualizationTools.plot_line(x_values_lw, y_plot_wall_lw, self.line_pub_left, frame=self.PLOT_FRAME)
 
-        y_plot_ft = slope_ft * x_values_ft + y_intercept_ft
-        VisualizationTools.plot_line(x_values_ft,y_plot_ft,self.line_pub_front,frame=frame_plot)
+        y_plot_fw = slope_fw * x_values_fw + y_intercept_fw
+        VisualizationTools.plot_line(x_values_fw, y_plot_fw, self.line_pub_front, frame=self.PLOT_FRAME)
         
         # Plot the path
-        # y_plot_path = slope * x_values + shifted_y_intercept
-        # VisualizationTools.plot_line(x_values, y_plot_path, self.line_pub, frame="/base_link")
+        shifted_y_intercept = y_intercept_lw - self.DESIRED_DISTANCE if self.SIDE == 1 else y_intercept_rw + self.DESIRED_DISTANCE
+        x_path = x_values_lw if self.SIDE == 1 else x_values_rw
+        slope_path = slope_lw if self.SIDE == 1 else slope_rw
+        y_plot_path = x_path * slope_path + shifted_y_intercept
+        VisualizationTools.plot_line(x_path, y_plot_path, self.path_pub, frame=self.PLOT_FRAME, color=(0., 1., 0.))
 
         # Find where our look ahead intersects the path
-
         max_wall_distance = 3.0
-        intersect_threshold = 1.0
         if self.SIDE == -1:
             intersect = self.circle_intersection(slope_rw, shifted_y_intercept, self.LOOK_AHEAD)
         else:
@@ -208,33 +211,39 @@ class WallFollower(Node):
         
         turn_angle = math.atan2(2 * self.BASE_LENGTH * intersect[1], self.LOOK_AHEAD**2)
             
-        # If close to a front wall and front wall is unique
+        # If close to a front wall
         if max(front_ranges) < max_wall_distance:
-            #if there is a corner, find which side is open and drive toward it
-            if max(abs(side_ranges_lw)) > 2*max(abs(side_ranges_rw)): #right wall, y positive after reflection
-                angle = self.line_intersection([slope_ft,y_intercept_ft],[slope_rw,y_intercept_rw])
+
+            # If there is a corner, find which side is open and drive toward it
+            if max(abs(side_ranges_lw)) > 2 * max(abs(side_ranges_rw)): # Right wall, y positive after reflection
+                angle = self.line_intersection([slope_fw, y_intercept_fw], [slope_rw, y_intercept_rw])
                 intersect = self.LOOK_AHEAD*np.array([np.cos(angle),np.sin(angle)])
                 turn_angle = math.atan2(2 * self.BASE_LENGTH * math.sin(math.atan2(intersect[1], intersect[0])), math.sqrt(intersect[0]**2 + intersect[1]**2))
 
-            elif max(abs(side_ranges_rw)) > 2*max(abs(side_ranges_lw)): #left , y negative
-                angle = self.line_intersection([slope_ft,y_intercept_ft],[slope_lw,y_intercept_lw])
+            elif max(abs(side_ranges_rw)) > 2 * max(abs(side_ranges_lw)): # Left wall, y negative after reflection
+                angle = self.line_intersection([slope_fw, y_intercept_fw], [slope_lw, y_intercept_lw])
                 intersect = -self.LOOK_AHEAD*np.array([np.cos(angle),np.sin(angle)])
                 turn_angle = math.atan2(2 * self.BASE_LENGTH * math.sin(math.atan2(intersect[1], intersect[0])), math.sqrt(intersect[0]**2 + intersect[1]**2))
             
         # Plot the destination point
-        angles = np.linspace(0, 2*np.pi, 20)
-        x_dest = intersect[0] + 0.1 * np.cos(angles)
-        y_dest = intersect[1] + 0.1 * np.sin(angles)
-        VisualizationTools.plot_line(x_dest, y_dest, self.line_pub_left, frame=frame_plot, color=(0., 1., 0.))
-
-        speed = self.VELOCITY
-
+        ang_dest = np.linspace(0, 2*np.pi, 20)
+        x_dest = intersect[0] + 0.1 * np.cos(ang_dest)
+        y_dest = intersect[1] + 0.1 * np.sin(ang_dest)
+        VisualizationTools.plot_line(x_dest, y_dest, self.path_pub, frame=self.PLOT_FRAME, color=(0., 1., 0.))
+        
         # Publish our drive command
         drive_cmd = AckermannDriveStamped()
-        drive_cmd.drive.speed = speed
+        drive_cmd.drive.speed = self.VELOCITY
         drive_cmd.drive.steering_angle = turn_angle
-        self.get_logger().info("publishing drive cmd %s" % str(drive_cmd))
+        #self.get_logger().info("publishing drive cmd %s" % str(drive_cmd))
         self.cmd_pub.publish(drive_cmd)
+
+        # Publish performance metrics
+        metric_str = String()        
+        valid_side = (angles > math.radians(85)) & (angles < math.radians(95)) if self.SIDE == -1 else (angles < math.radians(-85)) & (angles > math.radians(-95))
+        side_dist = np.mean(ranges[valid_side])
+        metric_str.data = "Average side distance: %f" % side_dist
+        self.metric_pub.publish(metric_str)
 
 def main():
     
