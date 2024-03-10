@@ -32,13 +32,13 @@ class WallFollower(Node):
         self.DESIRED_DISTANCE = self.get_parameter('desired_distance').get_parameter_value().double_value
 
         # Local constants
-        self.L_CULL_ANGLE = math.radians(0)
-        self.R_CULL_ANGLE = math.radians(45)
+        self.L_CULL_ANGLE = math.radians(30)
+        self.R_CULL_ANGLE = math.radians(120)
 
         self.F_CULL_ANGLE = math.radians(20)
 
         self.CULL_DISTANCE = 5
-        self.LOOK_AHEAD = 1 # Should prob be a function of speed
+        self.LOOK_AHEAD = 1.0 # Should prob be a function of speed
         self.BASE_LENGTH = 0.3
 
         self.get_logger().info(str(self.VELOCITY))
@@ -211,19 +211,19 @@ class WallFollower(Node):
         
         turn_angle = math.atan2(2 * self.BASE_LENGTH * intersect[1], self.LOOK_AHEAD**2)
             
-        # If close to a front wall
-        if max(front_ranges) < max_wall_distance:
+        # # If close to a front wall
+        # if max(front_ranges) < max_wall_distance:
 
-            # If there is a corner, find which side is open and drive toward it
-            if max(abs(side_ranges_lw)) > 2 * max(abs(side_ranges_rw)): # Right wall, y positive after reflection
-                angle = self.line_intersection([slope_fw, y_intercept_fw], [slope_rw, y_intercept_rw])
-                intersect = self.LOOK_AHEAD*np.array([np.cos(angle),np.sin(angle)])
-                turn_angle = math.atan2(2 * self.BASE_LENGTH * math.sin(math.atan2(intersect[1], intersect[0])), math.sqrt(intersect[0]**2 + intersect[1]**2))
+        #     # If there is a corner, find which side is open and drive toward it
+        #     if max(abs(side_ranges_lw)) > 2 * max(abs(side_ranges_rw)): # Right wall, y positive after reflection
+        #         angle = self.line_intersection([slope_fw, y_intercept_fw], [slope_rw, y_intercept_rw])
+        #         intersect = self.LOOK_AHEAD*np.array([np.cos(angle),np.sin(angle)])
+        #         turn_angle = math.atan2(2 * self.BASE_LENGTH * math.sin(math.atan2(intersect[1], intersect[0])), math.sqrt(intersect[0]**2 + intersect[1]**2))
 
-            elif max(abs(side_ranges_rw)) > 2 * max(abs(side_ranges_lw)): # Left wall, y negative after reflection
-                angle = self.line_intersection([slope_fw, y_intercept_fw], [slope_lw, y_intercept_lw])
-                intersect = -self.LOOK_AHEAD*np.array([np.cos(angle),np.sin(angle)])
-                turn_angle = math.atan2(2 * self.BASE_LENGTH * math.sin(math.atan2(intersect[1], intersect[0])), math.sqrt(intersect[0]**2 + intersect[1]**2))
+        #     elif max(abs(side_ranges_rw)) > 2 * max(abs(side_ranges_lw)): # Left wall, y negative after reflection
+        #         angle = self.line_intersection([slope_fw, y_intercept_fw], [slope_lw, y_intercept_lw])
+        #         intersect = -self.LOOK_AHEAD*np.array([np.cos(angle),np.sin(angle)])
+        #         turn_angle = math.atan2(2 * self.BASE_LENGTH * math.sin(math.atan2(intersect[1], intersect[0])), math.sqrt(intersect[0]**2 + intersect[1]**2))
             
         # Plot the destination point
         ang_dest = np.linspace(0, 2*np.pi, 20)
