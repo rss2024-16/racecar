@@ -6,5 +6,5 @@ wall_follower:
     drive_topic: "/vesc/input/navigation" # Robot
     plot_frame: "/laser" # Robot
     side: -1
-    velocity: 1.0
+    velocity: 2.0
     desired_distance: 1.

@@ -10,6 +10,8 @@ from visualization_msgs.msg import Marker
 
 from wall_follower.visualization_tools import VisualizationTools
 
+import time
+
 
 class WallFollower(Node):
 
@@ -37,8 +39,8 @@ class WallFollower(Node):
 
         self.F_CULL_ANGLE = math.radians(20)
 
-        self.CULL_DISTANCE = 5
-        self.LOOK_AHEAD = 1.0 # Should prob be a function of speed
+        self.CULL_DISTANCE = 2.0
+        self.LOOK_AHEAD = 3.0 # Should prob be a function of speed
         self.BASE_LENGTH = 0.3
 
         self.get_logger().info(str(self.VELOCITY))
@@ -53,6 +55,19 @@ class WallFollower(Node):
         self.line_pub_front = self.create_publisher(Marker, '/front_wall', 10)
         self.path_pub = self.create_publisher(Marker, '/path', 10)
         self.metric_pub = self.create_publisher(String, '/wall_follower_metrics', 10)
+
+        #stat tracking
+        try:
+            self.metrics_dict['test'] = False
+        except:
+            self.metrics_dict = \
+                {
+                'look_ahead':[],
+                'front_wall': [],
+                'following_wall':[],
+                'average_dist':[],
+                'test':False
+                }
 
     def polar_to_cartesian(self, radius, theta):
         x = radius * np.cos(theta)
@@ -184,16 +199,31 @@ class WallFollower(Node):
         slope_rw, y_intercept_rw = np.polyfit(x_values_rw, y_values_rw, 1)
         slope_lw, y_intercept_lw = np.polyfit(x_values_lw, y_values_lw, 1)
         slope_fw,y_intercept_fw = self.fit_line_ransac(x_values_fw, y_values_fw)
+
+        slope_threshold = .5
+        
+        slope = slope_rw if self.SIDE == -1 else slope_lw
+
+        self.get_logger().info(str(slope))
+
+        # if abs(slope) > slope_threshold:
+        #     look_ahead = 1
+        # else:
+        #     look_ahead = self.LOOK_AHEAD
+
+        look_ahead = self.LOOK_AHEAD
+
+
         
         # Plot the walls
         y_plot_wall_rw = slope_rw * x_values_rw + y_intercept_rw
         VisualizationTools.plot_line(x_values_rw, y_plot_wall_rw, self.line_pub_right, frame=self.PLOT_FRAME)
     
-        y_plot_wall_lw = slope_lw * x_values_lw + y_intercept_lw
-        VisualizationTools.plot_line(x_values_lw, y_plot_wall_lw, self.line_pub_left, frame=self.PLOT_FRAME)
+        # y_plot_wall_lw = slope_lw * x_values_lw + y_intercept_lw
+        # VisualizationTools.plot_line(x_values_lw, y_plot_wall_lw, self.line_pub_left, frame=self.PLOT_FRAME)
 
-        y_plot_fw = slope_fw * x_values_fw + y_intercept_fw
-        VisualizationTools.plot_line(x_values_fw, y_plot_fw, self.line_pub_front, frame=self.PLOT_FRAME)
+        # y_plot_fw = slope_fw * x_values_fw + y_intercept_fw
+        # VisualizationTools.plot_line(x_values_fw, y_plot_fw, self.line_pub_front, frame=self.PLOT_FRAME)
         
         # Plot the path
         shifted_y_intercept = y_intercept_lw - self.DESIRED_DISTANCE if self.SIDE == 1 else y_intercept_rw + self.DESIRED_DISTANCE
@@ -205,25 +235,25 @@ class WallFollower(Node):
         # Find where our look ahead intersects the path
         max_wall_distance = 3.0
         if self.SIDE == -1:
-            intersect = self.circle_intersection(slope_rw, shifted_y_intercept, self.LOOK_AHEAD)
+            intersect = self.circle_intersection(slope_rw, shifted_y_intercept, look_ahead)
         else:
-            intersect = self.circle_intersection(slope_lw, shifted_y_intercept, self.LOOK_AHEAD)
+            intersect = self.circle_intersection(slope_lw, shifted_y_intercept, look_ahead)
         
-        turn_angle = math.atan2(2 * self.BASE_LENGTH * intersect[1], self.LOOK_AHEAD**2)
+        turn_angle = math.atan2(2 * self.BASE_LENGTH * intersect[1], look_ahead**2)
             
-        # # If close to a front wall
-        # if max(front_ranges) < max_wall_distance:
+        # If close to a front wall
+        if max(front_ranges) < max_wall_distance:
 
-        #     # If there is a corner, find which side is open and drive toward it
-        #     if max(abs(side_ranges_lw)) > 2 * max(abs(side_ranges_rw)): # Right wall, y positive after reflection
-        #         angle = self.line_intersection([slope_fw, y_intercept_fw], [slope_rw, y_intercept_rw])
-        #         intersect = self.LOOK_AHEAD*np.array([np.cos(angle),np.sin(angle)])
-        #         turn_angle = math.atan2(2 * self.BASE_LENGTH * math.sin(math.atan2(intersect[1], intersect[0])), math.sqrt(intersect[0]**2 + intersect[1]**2))
+            # If there is a corner, find which side is open and drive toward it
+            if max(abs(side_ranges_lw)) > 2 * max(abs(side_ranges_rw)): # Right wall, y positive after reflection
+                angle = self.line_intersection([slope_fw, y_intercept_fw], [slope_rw, y_intercept_rw])
+                intersect = look_ahead*np.array([np.cos(angle),np.sin(angle)])
+                turn_angle = math.atan2(2 * self.BASE_LENGTH * math.sin(math.atan2(intersect[1], intersect[0])), math.sqrt(intersect[0]**2 + intersect[1]**2))
 
-        #     elif max(abs(side_ranges_rw)) > 2 * max(abs(side_ranges_lw)): # Left wall, y negative after reflection
-        #         angle = self.line_intersection([slope_fw, y_intercept_fw], [slope_lw, y_intercept_lw])
-        #         intersect = -self.LOOK_AHEAD*np.array([np.cos(angle),np.sin(angle)])
-        #         turn_angle = math.atan2(2 * self.BASE_LENGTH * math.sin(math.atan2(intersect[1], intersect[0])), math.sqrt(intersect[0]**2 + intersect[1]**2))
+            elif max(abs(side_ranges_rw)) > 2 * max(abs(side_ranges_lw)): # Left wall, y negative after reflection
+                angle = self.line_intersection([slope_fw, y_intercept_fw], [slope_lw, y_intercept_lw])
+                intersect = -look_ahead*np.array([np.cos(angle),np.sin(angle)])
+                turn_angle = math.atan2(2 * self.BASE_LENGTH * math.sin(math.atan2(intersect[1], intersect[0])), math.sqrt(intersect[0]**2 + intersect[1]**2))
             
         # Plot the destination point
         ang_dest = np.linspace(0, 2*np.pi, 20)
@@ -242,8 +272,13 @@ class WallFollower(Node):
         metric_str = String()        
         valid_side = (angles > math.radians(85)) & (angles < math.radians(95)) if self.SIDE == -1 else (angles < math.radians(-85)) & (angles > math.radians(-95))
         side_dist = np.mean(ranges[valid_side])
-        metric_str.data = "Average side distance: %f" % side_dist
+        min_dist = min(ranges[valid_side])
+        metric_str.data = f"Average side distance: {side_dist}, Min distance: {min_dist}"
         self.metric_pub.publish(metric_str)
+        self.metrics_dict['look_ahead'].append(look_ahead)
+        self.metrics_dict['front_wall'].append(max(front_ranges))
+        self.metrics_dict['following_wall'].append(min_dist)
+        self.metrics_dict['average_dist'].append(side_dist)
 
 def main():
     
@@ -251,11 +286,9 @@ def main():
     wall_follower = WallFollower()
     try:
         rclpy.spin(wall_follower)
-    except KeyboardInterrupt:
-        stop_msg = AckermannDriveStamped()
-        stop_msg.drive.speed=0.0
-        stop_msg.drive.steering_angle=0.0
-        wall_follower.cmd_pub.publish(stop_msg)
+    except:
+        pass
+    np.save(str(time.time()),wall_follower.metrics_dict)
     wall_follower.destroy_node()
     rclpy.shutdown()
 
