@@ -1,7 +1,10 @@
+# drive_topic and plot_frame default to simulator values, comment them out to use the sim
+
 wall_follower:
   ros__parameters:
     scan_topic: "/scan"
-    drive_topic: "/drive"
+    drive_topic: "/vesc/input/navigation" # Robot
+    plot_frame: "/laser" # Robot
     side: -1
-    velocity: 1.0
+    velocity: 2.0
     desired_distance: 1.
