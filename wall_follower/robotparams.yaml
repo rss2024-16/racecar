@@ -1,0 +1,6 @@
+safety_controller:
+  ros__parameters:
+    scan_topic: "/scan"
+    navigation_topic: "/vesc/low_level/ackermann_cmd"
+    safety_topic: "/vesc/low_level/input/safety"
+    # stop_range: 1.0

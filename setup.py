@@ -28,6 +28,7 @@ setup(
             'wall_follower = wall_follower.wall_follower:main',
 	        'viz_example = wall_follower.viz_example:main',
         	'test_wall_follower = wall_follower.test_wall_follower:main',
+            'safety_controller = wall_follower.safety_controller:main'
         ],
     },
 )
